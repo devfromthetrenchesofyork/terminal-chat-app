@@ -1,0 +1,191 @@
+<div id="terminal">
+</div>
+
+<div id="input-line">
+    <span id="prompt">&gt;</span>
+</div>
+
+<style>
+    body {
+        background-color: black;
+        color: #00ff00;
+        font-family: 'Courier New', Courier, monospace;
+        margin: 0;
+        padding: 10px;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+    }
+
+    #terminal {
+        flex-grow: 1;
+        overflow-y: auto;
+        padding-bottom: 10px;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+
+    #input-line {
+        display: flex;
+        align-items: center;
+        padding: 5px 0;
+    }
+
+    #prompt {
+        color: #00ff00;
+        margin-right: 8px;
+    }
+
+    .user-input {
+        background-color: transparent;
+        border: none;
+        color: #00ff00;
+        font-family: 'Courier New', Courier, monospace;
+        font-size: inherit;
+        flex-grow: 1;
+        outline: none;
+    }
+
+    .response {
+        margin-top: 5px;
+        margin-bottom: 15px;
+    }
+
+    .error {
+        color: red;
+    }
+
+    /* Style for the typing animation */
+    @keyframes blink {
+        0% { opacity: 1; }
+        50% { opacity: 0; }
+        100% { opacity: 1; }
+    }
+
+    .typing::after {
+        content: '▋';
+        animation: blink 1s infinite;
+    }
+</style>
+
+<script>
+    const API_URL = window.location.hostname === 'localhost' 
+        ? 'http://localhost:3000'
+        : 'https://your-render-app.onrender.com';  // Replace with your actual Render.com URL
+
+    const terminal = document.getElementById('terminal');
+    const inputLine = document.getElementById('input-line');
+    let currentInput = null;
+    let isWaitingForResponse = false;
+
+    function createInput() {
+        if (currentInput) return currentInput;
+        
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'user-input';
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        
+        input.addEventListener('keypress', async (e) => {
+            if (e.key === 'Enter' && !isWaitingForResponse) {
+                const message = input.value.trim();
+                if (message) {
+                    await handleMessage(message);
+                    input.value = '';
+                }
+            }
+        });
+
+        inputLine.appendChild(input);
+        currentInput = input;
+        return input;
+    }
+
+    function appendToTerminal(text, isUser = false, isError = false) {
+        const line = document.createElement('div');
+        line.className = isError ? 'error' : 'response';
+        
+        if (isUser) {
+            line.textContent = '> ' + text;
+        } else {
+            line.textContent = text;
+        }
+        
+        terminal.appendChild(line);
+        terminal.scrollTop = terminal.scrollHeight;
+        return line;
+    }
+
+    async function handleMessage(message) {
+        if (isWaitingForResponse) return;
+        
+        isWaitingForResponse = true;
+        appendToTerminal(message, true);
+        
+        const responseLine = appendToTerminal('');
+        responseLine.classList.add('typing');
+        
+        try {
+            const response = await fetch(`${API_URL}/chat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ message })
+            });
+
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let responseText = '';
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n');
+                
+                for (const line of lines) {
+                    if (line.trim() === '') continue;
+                    
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6);
+                        if (data === '[DONE]') {
+                            break;
+                        } else if (data === '[ERROR]') {
+                            throw new Error('Server error');
+                        } else {
+                            responseText += data;
+                            responseLine.textContent = responseText;
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            appendToTerminal('An error occurred while processing your message.', false, true);
+        } finally {
+            responseLine.classList.remove('typing');
+            isWaitingForResponse = false;
+        }
+    }
+
+    // Initialize
+    const input = createInput();
+    input.focus();
+
+    // Keep focus on input
+    document.addEventListener('click', () => {
+        input.focus();
+    });
+
+    // Prevent focus loss
+    input.addEventListener('blur', () => {
+        setTimeout(() => input.focus(), 10);
+    });
+</script>
